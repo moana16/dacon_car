@@ -25,7 +25,7 @@ train.target.head()
 
 # 3. 데이터 전처리
 
-
+# 오탈자 처리
 train[train['year'] < 1900]
 train = train[train['year'] > 1900]
 train = train.drop('id', axis = 1).reset_index().drop('index', axis = 1).reset_index().rename({'index':'id'}, axis = 'columns')
@@ -34,13 +34,16 @@ train.shape
 
 train['title'].value_counts()[:20]
 
+# Brand 상위 션수 생성 후 브랜드 별 카테고리 변수 추가
 train['brand'] = train['title'].apply(lambda x : x.split(" ")[0])
 train.head()
 
 
+# 201개의 카테고리에서 41개의 카테고리로 줄어든 것을 알 수 있음
 print('title의 unique 카테고리 개수 : ', len(train['title'].value_counts()))
 print('brand의 unique 카테고리 개수 : ', len(train['brand'].value_counts()))
 
+# 띄어쓰기, 대소문자 획일화
 train['paint'].value_counts()[:20]
 
 import re 
@@ -71,6 +74,7 @@ print('정제 후 brand의 unique 카테고리 개수 : ', len(train['paint'].un
 
 train['paint'].value_counts()[:20]
 
+# 색상변수 획일화
 train['paint'] = train['paint'] = train['paint'].apply(lambda x : 'blue' if x.find('blue') >= 0 else x)
 train['paint'] = train['paint'] = train['paint'].apply(lambda x : 'red' if x.find('red') >= 0 else x)
 train['paint'] = train['paint'] = train['paint'].apply(lambda x : 'green' if x.find('green') >= 0 else x)
@@ -93,7 +97,7 @@ train['paint'].value_counts()
 print('paint의 unique 카테고리 개수 : ', len(train['paint'].value_counts()))
 
 
-
+# 라벨인코딩
 obj_columns = [cname for cname in train.columns if train[cname].dtype=='object']
 num_columns = [cname for cname in train.columns if train[cname].dtype=='int64']
 print(obj_columns)
@@ -146,23 +150,20 @@ val_data_y = val_data.target #validation 데이터에서 target 추출
 
 
 
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.ensemble import GradientBoostingRegressor
+
 
 
 
 # 5. 각 머신러닝 클래스 별 모델 객체를 생성하고 학습을 진행
 
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor
 
-
-# 앙상블을 구현하기 위한 내부 모델의 클래스 로딩
-model_rf = RandomForestRegressor(bootstrap=True, ccp_alpha=0.0, criterion='mse',
-                       max_depth=None, max_features='auto', max_leaf_nodes=None,
-                       max_samples=None, min_impurity_decrease=0.0,
-                       min_impurity_split=None, min_samples_leaf=1,
-                       min_samples_split=2, min_weight_fraction_leaf=0.0,
-                       n_estimators=100, n_jobs=-1, oob_score=False,
-                       random_state=42, verbose=0, warm_start=False).fit(train_data_X,train_data_y)
+model_rf = RandomForestRegressor(n_estimators=300,
+                                     max_depth=3,
+                                     subsample=1.0,
+                                     criterion='mae',
+                                     random_state=11).fit(train_data_X,train_data_y)
 
 model_gb = GradientBoostingRegressor(n_estimators=300,
                                      max_depth=3,
@@ -170,15 +171,6 @@ model_gb = GradientBoostingRegressor(n_estimators=300,
                                      criterion='mae',
                                      random_state=11).fit(train_data_X,train_data_y)
 
-model_best = GradientBoostingRegressor(alpha=0.9, ccp_alpha=0.0, criterion='friedman_mse',
-                           init=None, learning_rate=0.1, loss='ls', max_depth=3,
-                           max_features=None, max_leaf_nodes=None,
-                           min_impurity_decrease=0.0, min_impurity_split=None,
-                           min_samples_leaf=1, min_samples_split=2,
-                           min_weight_fraction_leaf=0.0, n_estimators=100,
-                           n_iter_no_change=None, presort='deprecated',
-                           random_state=42, subsample=1.0, tol=0.0001,
-                           validation_fraction=0.1, verbose=0, warm_start=False).fit(train_data_X,train_data_y)
 
 
 import numpy as np
@@ -201,22 +193,76 @@ y_hat_best = model_best.predict(val_data_X) # y예측
 print(f'모델 NMAE: {nmae(val_data_y,y_hat_gb)}')
 
 
+# 교차검증 데이터 셋을 분할하기 위한 클래스
+from sklearn.model_selection import KFold
+# 교차검증을 수행할 수 있는 함수
+from sklearn.model_selection import cross_val_score
+
+from sklearn.ensemble import GradientBoostingClassifier
+
+X, y = load_iris(return_X_y=True)
+
+print(X.shape)
+print(y.shape)
+
+# 전체 데이터를 훈련 및 테스트 세트로 분할
+X_train,X_test,y_train,y_test=train_test_split(
+    X, y,
+    test_size=0.2,
+    random_state=1,
+    stratify=y)
+
+# 모델의 학습에 사용할 파라메터의 정의
+param_grid = {'learning_rate':[0.1, 0.2, 0.3, 1., 0.01],
+              'max_depth':[1, 2, 3],
+              'subsample':[0.1, 0.2, 0.3, 1., 0.01],
+              'n_estimators':[100, 200, 300, 10, 50]}
+
+# 교차 검증 점수를 기반으로 최적의 하이퍼 파라메터를 
+# 검색할 수 있는 GridSearchCV 클래스
+from sklearn.model_selection import GridSearchCV
+
+# 교차 검증 수행을 위한 데이터 분할 객체
+cv=KFold(n_splits=5,shuffle=True,random_state=1)
+# 교차 검증에 사용할 기본 머신러닝 모델
+base_model=GradientBoostingRegressor(random_state=1)
 
 
+grid_model = GridSearchCV(estimator=base_model,
+                          param_grid=param_grid,
+                          cv=cv,
+                          n_jobs=-1)
+grid_model.fit(X_train,y_train)
 
-train_X = train.drop(['id', 'target'], axis = 1) #training 데이터에서 피쳐 추출
-train_y = train.target #training 데이터에서 target 추출
+# 모든 하이퍼 파라메터를 조합하여 평가한 
+# 가장 높은 교차검증 SCORE 값을 반환
+print(f'best_score -> {grid_model.best_score_}')
+# 가장 높은 교차검증 SCORE 가 어떤 
+# 하이퍼 파라메터를 조합했을 때 만들어 졌는지 확인
+print(f'best_params -> {grid_model.best_params_}')
+# 가장 높은 교차검증 SCORE의 
+# 하이퍼 파라메터를 사용하여 생성된 모델 객체를 반환
+print(f'best_model -> {grid_model.best_estimator_}')
+
+score = grid_model.score(X_train, y_train)
+print(f'SCORE(TRAIN) : {score:.5f}')
+score = grid_model.score(X_test, y_test)
+print(f'SCORE(TEST) : {score:.5f}')
 
 
+# training 데이터에서 피쳐 추출
+train_X = train.drop(['id', 'target'], axis = 1) 
+# training 데이터에서 target 추출
+train_y = train.target 
 
-model = RandomForestRegressor(bootstrap=True, ccp_alpha=0.0, criterion='mse',
-                       max_depth=None, max_features='auto', max_leaf_nodes=None,
-                       max_samples=None, min_impurity_decrease=0.0,
-                       min_impurity_split=None, min_samples_leaf=1,
-                       min_samples_split=2, min_weight_fraction_leaf=0.0,
-                       n_estimators=100, n_jobs=-1, oob_score=False,
-                       random_state=42, verbose=0, warm_start=False)
-model.fit(train_X, train_y) # 모델 학습
+
+# 모델 학습
+model = RandomForestRegressor(n_estimators=300,
+                                     max_depth=3,
+                                     subsample=1.0,
+                                     criterion='mae',
+                                     random_state=11)
+model.fit(train_X, train_y) 
 
 y_pred = model_gb.predict(train_X)
 y_pred[:5]
@@ -225,6 +271,8 @@ train_y[:5]
 y_hat = model.predict(train_X) # y예측
 print(f'모델 NMAE: {nmae(train_y,y_hat)}')
 
+
+# test 데이터 전처리
 test = test.drop('id', axis = 1)
 
 
@@ -293,7 +341,7 @@ print('paint의 unique 카테고리 개수 : ', len(test['paint'].value_counts()
 
 test.info()
 
-# 테스트 데이터 전처리
+# 라벨 인코딩
 obj_columns = [cname for cname in test.columns if test[cname].dtype=='object']
 num_columns = [cname for cname in test.columns if test[cname].dtype=='int64']
 print(obj_columns)
